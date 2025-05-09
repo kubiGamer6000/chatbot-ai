@@ -1,0 +1,9 @@
+.auth
+.temp
+.env
+.env.*
+node_modules
+update-env.sh
+dist/
+tsconfig.tsbuildinfo
+CLAUDE.md

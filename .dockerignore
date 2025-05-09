@@ -1,0 +1,40 @@
+# Node.js dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Build artifacts
+dist
+
+# Environment files (these should be added at runtime)
+.env
+.env.*
+
+# Git and GitHub files
+.git
+.github
+.gitignore
+
+# Temporary files and folders (will be mounted as volumes)
+.temp
+.temp/**
+
+# Auth files (will be mounted as volumes)
+.auth
+.auth/**
+
+# Logs
+*.log
+
+# Editor directories and files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Other
+README.md
+CLAUDE.md
+*.md 
+

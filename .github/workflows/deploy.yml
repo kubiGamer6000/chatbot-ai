@@ -1,0 +1,44 @@
+name: Deploy to DigitalOcean Droplet
+
+on:
+  push:
+    branches:
+      - main # Change this if you want to deploy from a different branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.KEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+          script: |
+            # Get the instances list
+            INSTANCES="${{ secrets.INSTANCES_LIST }}"
+
+            # Loop through each instance
+            for instance in $INSTANCES; do
+              echo "Deploying to instance: $instance"
+              
+              # Change to the instance directory
+              cd /home/dolan/$instance
+              
+              # Pull the latest code from GitHub
+              git pull
+              
+              # Install any new dependencies
+              /home/dolan/.local/share/pnpm/pnpm install
+              
+              # Build the application
+              /home/dolan/.local/share/pnpm/pnpm run build
+              
+              # Restart the application with PM2
+              pm2 restart $instance
+              
+              echo "Deployment to $instance finished."
+            done
