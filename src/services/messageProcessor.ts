@@ -629,13 +629,23 @@ const processMessages = async (messages: WAMessage[], jid: string) => {
       if (
         message.message?.conversation?.startsWith("heyai") ||
         message.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(
-          "34655623426@s.whatsapp.net"
+          process.env.WHATSAPP_PHONE_NUMBER + "@s.whatsapp.net"
         ) ||
         message.message?.imageMessage?.caption?.includes("heyai") ||
-        message.message?.imageMessage?.caption?.includes("@34655623426") ||
-        message.message?.documentMessage?.caption?.includes("@34655623426") ||
+        message.message?.imageMessage?.caption?.includes(
+          "@" + process.env.WHATSAPP_PHONE_NUMBER
+        ) ||
+        message.message?.documentMessage?.caption?.includes(
+          "@" + process.env.WHATSAPP_PHONE_NUMBER
+        ) ||
         message.message?.extendedTextMessage?.text?.includes("heyai") ||
-        message.message?.extendedTextMessage?.text?.includes("@34655623426")
+        message.message?.extendedTextMessage?.text?.includes(
+          "@" + process.env.WHATSAPP_PHONE_NUMBER
+        ) ||
+        message.message?.videoMessage?.caption?.includes(
+          "@" + process.env.WHATSAPP_PHONE_NUMBER
+        ) ||
+        message.message?.videoMessage?.caption?.includes("heyai")
       ) {
         shouldProcess = true;
         break;

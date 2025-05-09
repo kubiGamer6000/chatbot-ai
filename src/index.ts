@@ -109,8 +109,7 @@ async function connectToWhatsApp() {
       }
     } else if (connection === "open") {
       logger.info("opened connection");
-      // send message to telegram
-      await sendTelegramMessage("WhatsApp connection opened :))");
+      sendTelegramMessage("🟢 Bot WhatsApp connection opened");
     }
   });
 
@@ -218,5 +217,3 @@ app.listen(PORT, () => {
   // run in main file
   connectToWhatsApp();
 });
-
-connectToWhatsApp();

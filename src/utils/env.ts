@@ -17,6 +17,7 @@ const zodEnv = z.object({
 
   // WhatsApp config
   WHATSAPP_CLIENT_ID: z.string().min(1),
+  WHATSAPP_PHONE_NUMBER: z.string().min(1),
 
   // Firebase configs
   FIREBASE_SERVICE_ACCOUNT: z.string().min(1),
@@ -29,6 +30,7 @@ const zodEnv = z.object({
   OPENAI_API_KEY: z.string().min(1),
   ANTHROPIC_API_KEY: z.string().optional(),
   LLAMA_CLOUD_API_KEY: z.string().min(1),
+  GOOGLE_API_KEY: z.string().min(1),
 
   // Webhook URL
   WEBHOOK_URL: z.string().min(1),
