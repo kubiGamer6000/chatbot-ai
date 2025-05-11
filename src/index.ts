@@ -11,6 +11,8 @@ import { generateQRImage } from "./utils/generateQrImage";
 import * as fs from "fs";
 import { Boom } from "@hapi/boom";
 
+import { BaileysEventEmitter } from "@whiskeysockets/baileys";
+
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -25,7 +27,7 @@ import express, { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import type { Logger } from "pino";
 import { z } from "zod";
-// Add this near the top of the file, after imports
+import { handleMeetingWebhook } from "./services/meetingWebhookHandler";
 
 const processor = makeMessageProcessor();
 
@@ -173,7 +175,17 @@ app.use(
     res: express.Response,
     next: express.NextFunction
   ) => {
-    logger.error("Express error:", err);
+    logger.error(
+      {
+        err, // This properly serializes the entire error object
+        message: err.message,
+        stack: err.stack,
+        path: req.path,
+        method: req.method,
+      },
+      "Express error"
+    );
+
     res.status(500).json({ error: "Internal server error. See server logs." });
   }
 );
@@ -209,6 +221,32 @@ app.post("/sendMessage", async (req: any, res: any) => {
         error: "Failed to send message",
       });
     }
+  }
+});
+
+app.post("/meetingWebhook", async (req: any, res: any) => {
+  try {
+    logger.info("Received meeting webhook event", { event: req.body.event });
+
+    if (!req.body || !req.body.event) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Invalid webhook payload" });
+    }
+
+    // Just pass the entire sock object
+    const result = await handleMeetingWebhook(req.body, sock);
+
+    if (result.success) {
+      return res.status(200).json({ success: true });
+    } else {
+      return res.status(400).json(result);
+    }
+  } catch (error) {
+    logger.error("Error handling webhook", error);
+    return res
+      .status(500)
+      .json({ success: false, error: "Internal server error" });
   }
 });
 

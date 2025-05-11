@@ -26,7 +26,7 @@ jobs:
               echo "Deploying to instance: $instance"
               
               # Change to the instance directory
-              cd /root/$instance
+              cd /home/nodejs/$instance
               
               # Pull the latest code from GitHub
               git pull
@@ -38,7 +38,7 @@ jobs:
               pnpm run build
               
               # Restart the application with PM2
-              pm2 restart $instance
+              sudo -u nodejs pm2 restart $instance
               
               echo "Deployment to $instance finished."
             done
