@@ -223,9 +223,6 @@ app.post("/sendMessage", apiKeyAuth, async (req: any, res: any) => {
 
 app.post("/meetingWebhook", async (req: any, res: any) => {
   try {
-    console.log("Received meeting webhook event", {
-      event: JSON.stringify(req),
-    });
     logger.info("Received meeting webhook event", { event: req.body });
 
     if (!req.body || !req.body.event) {
@@ -243,6 +240,7 @@ app.post("/meetingWebhook", async (req: any, res: any) => {
       return res.status(400).json(result);
     }
   } catch (error) {
+    console.log(error);
     logger.error("Error handling webhook", error);
     return res
       .status(500)
