@@ -164,9 +164,6 @@ function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
-// Use the API key authentication middleware for all routes defined below it
-app.use(apiKeyAuth);
-
 // Error handling middleware
 app.use(
   (
@@ -193,7 +190,7 @@ app.use(
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
 //listen for post requests
-app.post("/sendMessage", async (req: any, res: any) => {
+app.post("/sendMessage", apiKeyAuth, async (req: any, res: any) => {
   logger.info(`Received request to send messages to ${req.body.jid}`);
   try {
     const validatedReq = SendMessageSchema.parse(req);
