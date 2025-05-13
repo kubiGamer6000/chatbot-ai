@@ -1,7 +1,7 @@
 // ENV SETUP //
 
 import "./utils/env.js";
-import makeMessageProcessor from "./services/messageProcessor.js";
+import makeMessageProcessor from "./messageProcessor.js";
 
 // SERVICES //
 import { sendTelegramMessage, sendTelegramPhoto } from "./services/telegram.js";
@@ -10,8 +10,6 @@ import { generateQRImage } from "./utils/generateQrImage.js";
 
 import * as fs from "fs";
 import { Boom } from "@hapi/boom";
-
-import { BaileysEventEmitter } from "@whiskeysockets/baileys";
 
 import makeWASocket, {
   Browsers,

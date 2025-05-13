@@ -1,10 +1,9 @@
-import { bucket, db } from "./firebase-admin.js";
+import { bucket, db } from "./services/firebase-admin.js";
 import type {
   makeWASocket,
   WAMessage,
   Chat,
   MessageType,
-  WAMessageKey,
 } from "@whiskeysockets/baileys";
 import {
   downloadMediaMessage,
@@ -19,19 +18,20 @@ import { jidNormalizedUser } from "@whiskeysockets/baileys";
 import { Timestamp } from "firebase-admin/firestore";
 import { writeFile, unlink, mkdir } from "fs/promises";
 import path from "path";
-import { processImage } from "./media/image.js";
-import { processAudio } from "./media/audio.js";
+import { processImage } from "./services/media/image.js";
+import { processAudio } from "./services/media/audio.js";
 
-import mime from "mime-types";
+import { processMessages } from "./services/chatbot.js";
 
-import logger from "../utils/logger.js";
-import { processDocument } from "./media/document.js";
+import logger from "./utils/logger.js";
+import { processDocument } from "./services/media/document.js";
 
-import type { FirestoreMessage } from "../types.js";
+import type { FirestoreMessage } from "./types.js";
 
-import { processVideo } from "./media/video.js";
-import { sendWebhook } from "./webhook.js";
+import { processVideo } from "./services/media/video.js";
+import { sendWebhook } from "./services/webhook.js";
 import { Boom } from "@hapi/boom";
+import { createThread, runAgentThread } from "./services/langgraph.js";
 
 const serializeToPlainObject = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
@@ -45,6 +45,7 @@ const convertToFirestoreTimestamp = (unixTimestamp: number) => {
 // Collection references
 const chatsRef = db.collection(process.env.FIRESTORE_CHAT_COLLECTION!);
 const messagesRef = db.collection(process.env.FIRESTORE_MESSAGE_COLLECTION!);
+const threadsRef = db.collection("threads");
 const userConfigRef = db.collection("userConfig");
 
 export const loadMessages = async (jid: string, limit: number = 50) => {
@@ -292,7 +293,37 @@ async function handleNewMessage(
 
     // Queue message for further processing
     if (!msg.key.fromMe) {
-      await runMessageQueue(msg, sock);
+      // check if the chat alreadt has a thread in firestore
+
+      const threadRef = threadsRef.doc(jid);
+      const threadDoc = await threadRef.get();
+      if (!threadDoc.exists) {
+        // create a new thread with user's jid as the
+        const { agent, thread } = await createThread(jid);
+        await threadRef.set({
+          assistantId: agent.assistant_id,
+          threadId: thread.thread_id,
+        });
+      }
+
+      sock.sendPresenceUpdate("composing", jid);
+      const response = await runAgentThread(
+        threadDoc.data()?.threadId,
+        threadDoc.data()?.assistantId,
+        {
+          jid,
+          messageId: msgId,
+          type,
+          processResult,
+          isMedia: mediaContent ? true : false,
+          messageType: msgType,
+          mimeType: mediaContent?.mimetype ?? null,
+        } as any
+      );
+
+      sock.sendMessage(jid, { text: response as any });
+
+      // await runMessageQueue(msg, sock);
     }
   } catch (error) {
     const duration = Date.now() - startTime;
@@ -418,165 +449,6 @@ async function upsertChat(
     },
     { merge: true }
   );
-}
-
-const processMessages = async (messages: WAMessage[], jid: string) => {
-  if (isJidGroup(jid)) {
-    let shouldProcess = false;
-    for (const message of messages) {
-      if (
-        message.message?.conversation?.startsWith("heyai") ||
-        message.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(
-          process.env.WHATSAPP_PHONE_NUMBER + "@s.whatsapp.net"
-        ) ||
-        message.message?.imageMessage?.caption?.includes("heyai") ||
-        message.message?.imageMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.documentMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.extendedTextMessage?.text?.includes("heyai") ||
-        message.message?.extendedTextMessage?.text?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.videoMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.videoMessage?.caption?.includes("heyai")
-      ) {
-        shouldProcess = true;
-        break;
-      }
-    }
-    if (!shouldProcess) return;
-  }
-  logger.info(`Processing ${messages.length} messages for ${jid}`);
-  const messageHistory = await loadMessages(jid, 25);
-  console.log(messageHistory);
-  const { context, contextMessages } = generateLLMContext(
-    messageHistory,
-    jid,
-    Date.now()
-  );
-
-  logger.info("sending webhook");
-  await sendWebhook({
-    conversationContext: context,
-    contextMessages,
-    rawData: messageHistory,
-    jid,
-  });
-
-  // TODO: Queue to resend if webhook fails
-};
-
-type ContextMessage = {
-  key: WAMessageKey;
-  message: string;
-};
-
-function generateLLMContext(
-  messages: FirestoreMessage[],
-  currentChatId: string,
-  currentTime: number
-): { context: string; contextMessages: ContextMessage[] } {
-  let context = `-- CHAT ID: ${currentChatId} --\n`;
-  context += `- Current time: ${new Date(currentTime).toLocaleString()}\n`;
-  let contextMessages: ContextMessage[] = [];
-
-  // Calculate time since last message from me
-  const lastMessageFromMe = messages.findLast((msg) => msg.key.fromMe);
-
-  if (lastMessageFromMe?.messageTimestamp) {
-    const timeSince =
-      currentTime - toNumber(lastMessageFromMe.messageTimestamp) * 1000;
-    const minutes = Math.floor(timeSince / (1000 * 60));
-    context += `- Time since last message from me: ${minutes} minutes\n\n`;
-  }
-
-  // Process messages
-  messages.forEach((msg) => {
-    const timestamp = new Date(
-      toNumber(msg.messageTimestamp) * 1000
-    ).toLocaleString();
-    const sender = msg.key.fromMe ? "ME" : msg.pushName;
-
-    let messageContent = "";
-
-    if (msg.isMedia) {
-      switch (msg.messageType) {
-        case "imageMessage":
-          messageContent = `[IMAGE MESSAGE]\n${
-            msg.processResult
-              ? `Description of image: "${msg.processResult}"`
-              : ""
-          }`;
-          const imageCaption = msg.message?.imageMessage?.caption;
-          if (imageCaption)
-            messageContent += `\nCaption from sender: "${imageCaption}"`;
-          break;
-
-        case "audioMessage":
-          messageContent = `[VOICE MESSAGE]\n${
-            msg.processResult ? `Transcription: "${msg.processResult}"` : ""
-          }`;
-          break;
-        case "videoMessage":
-          messageContent = `[VIDEO MESSAGE]\n${
-            msg.processResult
-              ? `Full video description: "${msg.processResult}" \n Video Caption from sender: "${msg.message?.videoMessage?.caption}"`
-              : ""
-          }`;
-          break;
-
-        case "documentMessage":
-          messageContent = `[DOCUMENT MESSAGE]\n${
-            msg.processResult ? `Document contents: "${msg.processResult}"` : ""
-          }`;
-          const docCaption = msg.message?.documentMessage?.caption;
-          if (docCaption)
-            messageContent += `\nCaption from sender: "${docCaption}"`;
-          break;
-        case "documentWithCaptionMessage":
-          messageContent = `[DOCUMENT MESSAGE WITH CAPTION]\n${
-            msg.processResult ? `Document contents: "${msg.processResult}"` : ""
-          }`;
-          const docWithCaptionCaption =
-            msg.message?.documentWithCaptionMessage?.message?.documentMessage
-              ?.caption;
-          if (docWithCaptionCaption)
-            messageContent += `\nCaption from sender: "${docWithCaptionCaption}"`;
-          break;
-        case "stickerMessage":
-          messageContent = `[STICKER MESSAGE]\n${
-            msg.processResult
-              ? `Sticker description: "${msg.processResult}"`
-              : ""
-          }`;
-          break;
-        default:
-          messageContent = `Uncommon message type [${
-            msg.messageType
-          }]. Full message object ${JSON.stringify(msg.message)}`;
-          break;
-      }
-    } else {
-      messageContent =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        JSON.stringify(msg.message) ||
-        "";
-    }
-
-    // context += `[MSG ID: ${msg.key.id}] [${timestamp}] ${sender}: ${messageContent}\n`;
-    contextMessages.push({
-      key: msg.key,
-      message: `[${timestamp}] ${sender}: ${messageContent}\n`,
-    });
-  });
-
-  return { context, contextMessages };
 }
 
 /**
