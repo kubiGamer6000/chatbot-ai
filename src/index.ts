@@ -39,94 +39,77 @@ if (!logger) {
 let sock: ReturnType<typeof makeWASocket>;
 
 async function connectToWhatsApp() {
-  const groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false });
+  try {
+    const groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false });
 
-  const { state, saveCreds } = await useMultiFileAuthState(
-    path.join(__dirname, ".auth", process.env.WHATSAPP_CLIENT_ID)
-  );
+    const { state, saveCreds } = await useMultiFileAuthState(
+      path.join(__dirname, ".auth", process.env.WHATSAPP_CLIENT_ID)
+    );
 
-  sock = makeWASocket({
-    auth: state,
-    browser: Browsers.macOS("Desktop"),
-    cachedGroupMetadata: async (jid) => groupCache.get(jid),
-    markOnlineOnConnect: false,
-    getMessage: async (key) => {
-      const msg = await processor.loadMessage(key.id!);
+    sock = makeWASocket({
+      auth: state,
+      browser: Browsers.macOS("Desktop"),
+      cachedGroupMetadata: async (jid) => groupCache.get(jid),
+      markOnlineOnConnect: false,
+      getMessage: async (key) => {
+        const msg = await processor.loadMessage(key.id!);
 
-      return msg?.message || undefined;
-    },
-    logger: logger as Logger,
-  });
-
-  processor.bind(sock);
-
-  sock.ev.on("chats.upsert", () => {});
-
-  sock.ev.on("messages.upsert", async ({ messages }) => {
-    messages.forEach((message) => {
-      // if (message.key.fromMe) return;
-      // if (message.message?.conversation == "CLEAR_HISTORY") {
-      //   messageQueues.delete(message.key.remoteJid!);
-      //   return;
-      // }
-      // const chatId = message.key.remoteJid!;
-      // const queue = messageQueues.get(chatId);
-      // if (queue) {
-      //   clearTimeout(queue.timeout);
-      //   queue.messages.push(message);
-      // } else {
-      //   messageQueues.set(chatId, { messages: [message], timeout: null! });
-      // }
-      // const timeout = setTimeout(() => {
-      //   const { messages } = messageQueues.get(chatId)!;
-      //   processMessages(messages, chatId);
-      //   messageQueues.delete(chatId);
-      // }, MESSAGE_QUEUE_DELAY);
-      // messageQueues.get(chatId)!.timeout = timeout;
+        return msg?.message || undefined;
+      },
+      logger: logger as Logger,
     });
-  });
 
-  sock.ev.on("contacts.upsert", () => {});
+    processor.bind(sock);
 
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect } = update;
-    if (update.qr) {
-      const filePath = await generateQRImage(update.qr);
-      await sendTelegramPhoto(filePath, "New WhatsApp QR Code");
-      fs.unlinkSync(filePath);
-    }
-    if (connection === "close") {
-      const shouldReconnect =
-        (lastDisconnect?.error as Boom)?.output?.statusCode !==
-        DisconnectReason.loggedOut;
-      console.log(
-        "connection closed due to ",
-        lastDisconnect?.error,
-        ", reconnecting ",
-        shouldReconnect
-      );
-      // reconnect if not logged out
-      if (shouldReconnect) {
-        connectToWhatsApp();
+    sock.ev.on("chats.upsert", () => {});
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {});
+
+    sock.ev.on("contacts.upsert", () => {});
+
+    sock.ev.on("connection.update", async (update) => {
+      const { connection, lastDisconnect } = update;
+      if (update.qr) {
+        const filePath = await generateQRImage(update.qr);
+        await sendTelegramPhoto(filePath, "New WhatsApp QR Code");
+        fs.unlinkSync(filePath);
       }
-    } else if (connection === "open") {
-      logger.info("opened connection");
-      sendTelegramMessage("🟢 Bot WhatsApp connection opened");
-    }
-  });
+      if (connection === "close") {
+        const shouldReconnect =
+          (lastDisconnect?.error as Boom)?.output?.statusCode !==
+          DisconnectReason.loggedOut;
+        console.log(
+          "connection closed due to ",
+          lastDisconnect?.error,
+          ", reconnecting ",
+          shouldReconnect
+        );
+        // reconnect if not logged out
+        if (shouldReconnect) {
+          connectToWhatsApp();
+        }
+      } else if (connection === "open") {
+        logger.info("opened connection");
+        sendTelegramMessage("🟢 Bot WhatsApp connection opened");
+      }
+    });
 
-  sock.ev.on("groups.update", async ([event]) => {
-    if (!event?.id) return;
-    const metadata = await sock.groupMetadata(event.id);
-    groupCache.set(event.id, metadata);
-  });
+    sock.ev.on("groups.update", async ([event]) => {
+      if (!event?.id) return;
+      const metadata = await sock.groupMetadata(event.id);
+      groupCache.set(event.id, metadata);
+    });
 
-  sock.ev.on("group-participants.update", async (event) => {
-    if (!event.id) return;
-    const metadata = await sock.groupMetadata(event.id);
-    groupCache.set(event.id, metadata);
-  });
-  sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("group-participants.update", async (event) => {
+      if (!event.id) return;
+      const metadata = await sock.groupMetadata(event.id);
+      groupCache.set(event.id, metadata);
+    });
+    sock.ev.on("creds.update", saveCreds);
+  } catch (error) {
+    logger.error("Error connecting to WhatsApp", error);
+    throw error;
+  }
 }
 
 const SendMessageSchema = z.object({
@@ -223,6 +206,6 @@ app.post("/sendMessage", apiKeyAuth, async (req: any, res: any) => {
 
 app.listen(PORT, () => {
   logger.info(`Express server running on port ${PORT}`);
-  // run in main file
+
   connectToWhatsApp();
 });
