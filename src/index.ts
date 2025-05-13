@@ -1,6 +1,6 @@
 // ENV SETUP //
 
-import "./utils/env";
+import "./utils/env.js";
 import makeMessageProcessor from "./services/messageProcessor.js";
 
 // SERVICES //
