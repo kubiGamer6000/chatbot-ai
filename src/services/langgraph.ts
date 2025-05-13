@@ -19,7 +19,7 @@ export const createThread = async (threadId?: string) => {
   // We auto-create an assistant for each graph you register in config.
   const agent = assistants[0];
 
-  const thread = await client.threads.create({ threadId });
+  const thread = await client.threads.create();
 
   return { agent, thread };
 };

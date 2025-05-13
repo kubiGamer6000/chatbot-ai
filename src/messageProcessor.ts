@@ -299,7 +299,7 @@ async function handleNewMessage(
       const threadDoc = await threadRef.get();
       if (!threadDoc.exists) {
         // create a new thread with user's jid as the
-        const { agent, thread } = await createThread(jid);
+        const { agent, thread } = await createThread();
         await threadRef.set({
           assistantId: agent.assistant_id,
           threadId: thread.thread_id,
