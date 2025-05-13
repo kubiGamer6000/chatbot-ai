@@ -1,16 +1,16 @@
 import { ElevenLabsClient } from "elevenlabs";
-const ffmpeg = require("fluent-ffmpeg");
-import ffmpegPath from "ffmpeg-static";
+// const ffmpeg = require("fluent-ffmpeg");
+// import ffmpegPath from "ffmpeg-static";
 import fs from "fs";
 import { sendTelegramError } from "../telegram.js";
 import logger from "../../utils/logger.js";
 
-// Set ffmpeg path
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-} else {
-  logger.warn("ffmpeg-static path not found, using system ffmpeg if available");
-}
+// // Set ffmpeg path
+// if (ffmpegPath) {
+//   ffmpeg.setFfmpegPath(ffmpegPath);
+// } else {
+//   logger.warn("ffmpeg-static path not found, using system ffmpeg if available");
+// }
 
 /**
  * Convert audio file to MP3 format
