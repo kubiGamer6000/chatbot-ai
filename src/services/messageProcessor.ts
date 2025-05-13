@@ -1,8 +1,8 @@
 import { bucket, db } from "./firebase-admin.js";
 import type {
+  makeWASocket,
   WAMessage,
   Chat,
-  makeWASocket,
   MessageType,
   WAMessageKey,
 } from "@whiskeysockets/baileys";

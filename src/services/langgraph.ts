@@ -6,29 +6,29 @@ const client = new Client({
 });
 
 // List all assistants
-const assistants = await client.assistants.search({
-  metadata: null,
-  offset: 0,
-  limit: 10,
-});
+// const assistants = await client.assistants.search({
+//   metadata: null,
+//   offset: 0,
+//   limit: 10,
+// });
 
-// We auto-create an assistant for each graph you register in config.
-const agent = assistants[0];
+// // We auto-create an assistant for each graph you register in config.
+// const agent = assistants[0];
 
-const createThread = async (assistantId: string) => {
-  // Start a new thread
-  const thread = await client.threads.create();
-};
+// const createThread = async (assistantId: string) => {
+//   // Start a new thread
+//   const thread = await client.threads.create();
+// };
 
-const streamThread = async (threadId: string, assistantId: string) => {
-  // Start a streaming run
-  const messages = [{ role: "human", content: "what's the weather in la" }];
+// const streamThread = async (threadId: string, assistantId: string) => {
+//   // Start a streaming run
+//   const messages = [{ role: "human", content: "what's the weather in la" }];
 
-  const streamResponse = client.runs.stream(threadId, assistantId, {
-    input: { messages },
-  });
+//   const streamResponse = client.runs.stream(threadId, assistantId, {
+//     input: { messages },
+//   });
 
-  for await (const chunk of streamResponse) {
-    console.log(chunk);
-  }
-};
+//   for await (const chunk of streamResponse) {
+//     console.log(chunk);
+//   }
+// };

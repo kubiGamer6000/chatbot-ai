@@ -13,8 +13,7 @@ import { Boom } from "@hapi/boom";
 
 import { BaileysEventEmitter } from "@whiskeysockets/baileys";
 
-import {
-  makeWASocket,
+import makeWASocket, {
   Browsers,
   DisconnectReason,
   useMultiFileAuthState,
