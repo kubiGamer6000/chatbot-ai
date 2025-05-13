@@ -1,10 +1,7 @@
-import { admin, bucket, db } from "./firebase-admin";
+import { bucket, db } from "./firebase-admin.js";
 import type {
-  BaileysEventEmitter,
   WAMessage,
   Chat,
-  Contact,
-  GroupMetadata,
   makeWASocket,
   MessageType,
   WAMessageKey,
@@ -20,29 +17,18 @@ import { jidNormalizedUser } from "@whiskeysockets/baileys";
 import { Timestamp } from "firebase-admin/firestore";
 import { writeFile, unlink, mkdir } from "fs/promises";
 import path from "path";
-import { processImage } from "./media/image";
-import { processAudio } from "./media/audio";
+import { processImage } from "./media/image.js";
+import { processAudio } from "./media/audio.js";
 
 import mime from "mime-types";
-import * as fs from "fs";
 
-import logger from "../utils/logger";
-import { processDocument } from "./media/document";
+import logger from "../utils/logger.js";
+import { processDocument } from "./media/document.js";
 
-import type { FirestoreMessage } from "../types";
-import { createTask } from "./tasks";
-import { processVideo } from "./media/video";
-import { sendWebhook } from "./webhook";
+import type { FirestoreMessage } from "../types.js";
 
-const messageQueues = new Map<
-  string,
-  {
-    messages: WAMessage[];
-    timeout: NodeJS.Timeout;
-  }
->();
-let MESSAGE_QUEUE_DELAY = 10000; // 10 seconds in milliseconds
-let CONTEXT_LENGTH = 25;
+import { processVideo } from "./media/video.js";
+import { sendWebhook } from "./webhook.js";
 
 const serializeToPlainObject = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
@@ -103,14 +89,17 @@ export const bind = (sock: ReturnType<typeof makeWASocket>) => {
 
     logger.debug({ count: newMessages.length, type }, "Messages received");
 
+    //  INITIAL PROCESSING ON NEW MESSAGE EVENT
     for (const msg of newMessages) {
       try {
+        // FIND WHICH IF MESSAGE ISN'T FROM BOT, AND IF SO MARK IT AS READ
         const newMessagesFromOther = newMessages.filter(
           (msg) => !msg.key.fromMe
         );
         const newMessagesKeys = newMessagesFromOther.map((msg) => msg.key);
         await sock.readMessages(newMessagesKeys);
 
+        //  PROCESS MESSAGE
         if (type !== "append" && type !== "notify") return;
         await handleNewMessage(msg, type, sock);
       } catch (error) {
@@ -152,6 +141,17 @@ export const bind = (sock: ReturnType<typeof makeWASocket>) => {
 
   // Add messaging history sync handler
 };
+
+//* MESAGE QUEUE - simple fix for double-texting//
+const messageQueues = new Map<
+  string,
+  {
+    messages: WAMessage[];
+    timeout: NodeJS.Timeout;
+  }
+>();
+let MESSAGE_QUEUE_DELAY = 10000; // 10 seconds in milliseconds
+let CONTEXT_LENGTH = 25;
 
 const runMessageQueue = async (
   msg: WAMessage,
@@ -612,16 +612,6 @@ async function upsertChat(
   );
 }
 
-/**
- * Clears all messages for a given chat
- */
-async function clearChatHistory(chatId: string) {
-  const messages = await messagesRef.where("chatId", "==", chatId).get();
-  const batch = db.batch();
-  messages.docs.forEach((doc) => batch.delete(doc.ref));
-  await batch.commit();
-}
-
 const processMessages = async (messages: WAMessage[], jid: string) => {
   if (isJidGroup(jid)) {
     let shouldProcess = false;
@@ -779,6 +769,16 @@ function generateLLMContext(
   });
 
   return { context, contextMessages };
+}
+
+/**
+ * Clears all messages for a given chat
+ */
+async function clearChatHistory(chatId: string) {
+  const messages = await messagesRef.where("chatId", "==", chatId).get();
+  const batch = db.batch();
+  messages.docs.forEach((doc) => batch.delete(doc.ref));
+  await batch.commit();
 }
 
 export default function makeMessageProcessor() {

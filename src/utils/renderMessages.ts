@@ -1,5 +1,5 @@
 import { isJidGroup } from "@whiskeysockets/baileys";
-import { FirestoreMessage } from "../types";
+import { FirestoreMessage } from "../types.js";
 
 export function renderMessages(messages: FirestoreMessage[]): string {
   const renderedMessages: string[] = [];

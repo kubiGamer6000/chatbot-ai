@@ -1,9 +1,9 @@
 import { LlamaParseReader } from "llamaindex";
-import logger from "../../utils/logger";
-import { sendTelegramError } from "../telegram";
-import { processVideo } from "./video";
-import { processImage } from "./image";
-import { processAudio } from "./audio";
+import logger from "../../utils/logger.js";
+import { sendTelegramError } from "../telegram.js";
+import { processVideo } from "./video.js";
+import { processImage } from "./image.js";
+import { processAudio } from "./audio.js";
 
 /**
  * Process a document using LlamaParse

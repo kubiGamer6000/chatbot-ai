@@ -1,19 +1,20 @@
 // ENV SETUP //
 
 import "./utils/env";
-import makeMessageProcessor from "./services/messageProcessor";
+import makeMessageProcessor from "./services/messageProcessor.js";
 
 // SERVICES //
-import { sendTelegramMessage, sendTelegramPhoto } from "./services/telegram";
+import { sendTelegramMessage, sendTelegramPhoto } from "./services/telegram.js";
 
-import { generateQRImage } from "./utils/generateQrImage";
+import { generateQRImage } from "./utils/generateQrImage.js";
 
 import * as fs from "fs";
 import { Boom } from "@hapi/boom";
 
 import { BaileysEventEmitter } from "@whiskeysockets/baileys";
 
-import makeWASocket, {
+import {
+  makeWASocket,
   Browsers,
   DisconnectReason,
   useMultiFileAuthState,
@@ -21,13 +22,12 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import NodeCache from "node-cache";
 
-import logger from "./utils/logger";
+import logger from "./utils/logger.js";
 import path from "path";
 import express, { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import type { Logger } from "pino";
 import { z } from "zod";
-import { handleMeetingWebhook } from "./services/meetingWebhookHandler";
 
 const processor = makeMessageProcessor();
 
@@ -218,34 +218,6 @@ app.post("/sendMessage", apiKeyAuth, async (req: any, res: any) => {
         error: "Failed to send message",
       });
     }
-  }
-});
-
-app.post("/meetingWebhook", async (req: any, res: any) => {
-  try {
-    sendTelegramMessage("🟢 Received meeting webhook event: " + req.body);
-    logger.info("Received meeting webhook event", { event: req.body });
-
-    if (!req.body || !req.body.event) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Invalid webhook payload" });
-    }
-
-    // Just pass the entire sock object
-    const result = await handleMeetingWebhook(req.body, sock);
-
-    if (result.success) {
-      return res.status(200).json({ success: true });
-    } else {
-      return res.status(400).json(result);
-    }
-  } catch (error) {
-    console.log(error);
-    logger.error("Error handling webhook", error);
-    return res
-      .status(500)
-      .json({ success: false, error: "Internal server error" });
   }
 });
 

@@ -1,7 +1,7 @@
 import { OpenAI } from "openai";
 import fs from "fs";
-import { sendTelegramError } from "../telegram";
-import logger from "../../utils/logger";
+import { sendTelegramError } from "../telegram.js";
+import logger from "../../utils/logger.js";
 
 /**
  * Process an image using OpenAI's GPT-4o Vision API

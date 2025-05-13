@@ -2,8 +2,8 @@ import { ElevenLabsClient } from "elevenlabs";
 const ffmpeg = require("fluent-ffmpeg");
 import ffmpegPath from "ffmpeg-static";
 import fs from "fs";
-import { sendTelegramError } from "../telegram";
-import logger from "../../utils/logger";
+import { sendTelegramError } from "../telegram.js";
+import logger from "../../utils/logger.js";
 
 // Set ffmpeg path
 if (ffmpegPath) {

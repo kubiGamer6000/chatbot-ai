@@ -1,6 +1,6 @@
 import axios from "axios";
-import { sendTelegramError } from "./telegram";
-import logger from "../utils/logger";
+import { sendTelegramError } from "./telegram.js";
+import logger from "../utils/logger.js";
 
 export async function sendWebhook(data: any) {
   try {

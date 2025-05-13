@@ -1,5 +1,5 @@
 import build from "pino-abstract-transport";
-import { db } from "../services/firebase-admin";
+import { db } from "../services/firebase-admin.js";
 import type { WriteBatch } from "firebase-admin/firestore";
 
 interface LogEntry {

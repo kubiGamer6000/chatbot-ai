@@ -31,6 +31,7 @@ const zodEnv = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   LLAMA_CLOUD_API_KEY: z.string().min(1),
   GOOGLE_API_KEY: z.string().min(1),
+  LANGSMITH_API_KEY: z.string().min(1),
 
   // Webhook URL
   WEBHOOK_URL: z.string().min(1),

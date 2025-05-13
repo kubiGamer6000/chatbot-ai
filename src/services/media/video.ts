@@ -4,8 +4,8 @@ import {
   createPartFromUri,
 } from "@google/genai";
 import fs from "fs";
-import { sendTelegramError } from "../telegram";
-import logger from "../../utils/logger";
+import { sendTelegramError } from "../telegram.js";
+import logger from "../../utils/logger.js";
 
 /**
  * Process a video using Google's Gemini 2.5 Pro model

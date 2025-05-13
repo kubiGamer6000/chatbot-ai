@@ -1,11 +1,11 @@
 import { WAMessage } from "@whiskeysockets/baileys";
-import { db } from "./firebase-admin";
-import { FirestoreMessage } from "../types";
+import { db } from "./firebase-admin.js";
+import { FirestoreMessage } from "../types.js";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
-import { renderMessages } from "../utils/renderMessages";
-import logger from "../utils/logger";
+import { renderMessages } from "../utils/renderMessages.js";
+import logger from "../utils/logger.js";
 
 const actionSchema = z.object({
   action: z.enum(["calendar", "email", "whatsapp_message"]),

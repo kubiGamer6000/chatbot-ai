@@ -1,5 +1,5 @@
 import TelegramBot from "node-telegram-bot-api";
-import logger from "../utils/logger";
+import logger from "../utils/logger.js";
 import fs from "fs";
 
 // Bot instances and configuration
