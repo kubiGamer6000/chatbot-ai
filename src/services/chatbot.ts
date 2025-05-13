@@ -76,7 +76,7 @@ export function generateLLMContext(
   let contextMessages: ContextMessage[] = [];
 
   // Calculate time since last message from me
-  const lastMessageFromMe = messages.findLast((msg) => msg.key.fromMe);
+  const lastMessageFromMe = messages.findLast((msg) => msg?.key?.fromMe);
 
   if (lastMessageFromMe?.messageTimestamp) {
     const timeSince =
