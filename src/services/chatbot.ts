@@ -90,7 +90,7 @@ export function generateLLMContext(
     const timestamp = new Date(
       toNumber(msg.messageTimestamp) * 1000
     ).toLocaleString();
-    const sender = msg.key.fromMe ? "ME" : msg.pushName;
+    const sender = msg.key?.fromMe ? "ME" : msg.pushName;
 
     let messageContent = "";
 
@@ -161,7 +161,7 @@ export function generateLLMContext(
 
     // context += `[MSG ID: ${msg.key.id}] [${timestamp}] ${sender}: ${messageContent}\n`;
     contextMessages.push({
-      key: msg.key,
+      key: msg.key ?? "1",
       message: `[${timestamp}] ${sender}: ${messageContent}\n`,
     });
   });

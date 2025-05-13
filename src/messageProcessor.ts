@@ -310,18 +310,10 @@ async function handleNewMessage(
       const response = await runAgentThread(
         threadDoc.data()?.threadId,
         threadDoc.data()?.assistantId,
-        {
-          jid,
-          messageId: msgId,
-          type,
-          processResult,
-          isMedia: mediaContent ? true : false,
-          messageType: msgType,
-          mimeType: mediaContent?.mimetype ?? null,
-        } as any
+        messageData as FirestoreMessage
       );
 
-      sock.sendMessage(jid, { text: response as any });
+      console.log(JSON.stringify(response, null, 2));
 
       // await runMessageQueue(msg, sock);
     }

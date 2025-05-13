@@ -1,4 +1,4 @@
-import { Client } from "@langchain/langgraph-sdk";
+import { Client, ThreadState } from "@langchain/langgraph-sdk";
 import { FirestoreMessage } from "../types";
 import { generateLLMContext } from "./chatbot";
 
@@ -44,5 +44,6 @@ export const runAgentThread = async (
     },
   });
 
-  return response;
+  return (response as any).messages[(response as any).messages.length - 1]
+    .kwargs.content[0].text;
 };
