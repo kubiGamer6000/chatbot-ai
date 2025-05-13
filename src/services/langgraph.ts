@@ -45,5 +45,5 @@ export const runAgentThread = async (
   });
 
   return (response as any).messages[(response as any).messages.length - 1]
-    .kwargs.content[0].text;
+    .content[0].text;
 };
