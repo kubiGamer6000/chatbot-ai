@@ -8,6 +8,8 @@ import type {
 } from "@whiskeysockets/baileys";
 import {
   downloadMediaMessage,
+  extensionForMediaMessage,
+  extractMessageContent,
   getContentType,
   isJidGroup,
 } from "@whiskeysockets/baileys";
@@ -29,6 +31,7 @@ import type { FirestoreMessage } from "../types.js";
 
 import { processVideo } from "./media/video.js";
 import { sendWebhook } from "./webhook.js";
+import { Boom } from "@hapi/boom";
 
 const serializeToPlainObject = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
@@ -179,22 +182,24 @@ const runMessageQueue = async (
   messageQueues.get(chatId)!.timeout = timeout;
 };
 
-/**
- * Processes a single new message, handling commands, media, and storage
- */
+// * MESSAGE PROCESSOR - Processes a single new message, handling commands, media, and storage
+
 async function handleNewMessage(
   msg: WAMessage,
   type: "append" | "notify",
   sock: ReturnType<typeof makeWASocket>
 ) {
-  if (!msg.message) {
+  const msgContent = extractMessageContent(msg.message);
+
+  if (!msgContent) {
     logger.debug({ messageId: msg.key.id }, "Skipping message with no content");
     return;
   }
+
   // check if message id is already in the database
-  const messageRef = messagesRef.doc(msg.key.id!);
-  const messageDoc = await messageRef.get();
-  if (messageDoc.exists) {
+  const msgRef = messagesRef.doc(msg.key.id!);
+  const msgDoc = await msgRef.get();
+  if (msgDoc.exists) {
     logger.debug(
       { messageId: msg.key.id },
       "Skipping message that already exists"
@@ -202,20 +207,30 @@ async function handleNewMessage(
     return;
   }
 
+  const msgType = getContentType(msgContent);
   const jid = jidNormalizedUser(msg.key.remoteJid!);
-  const messageId = msg.key.id!;
+  const msgId = msg.key.id!;
+
   const startTime = Date.now();
 
-  // Handle commands
-  if (msg.message.conversation === "CLEAR_HISTORY") {
+  // * QUEUE COMMAND HANDLER - simple commands for managing history and response time
+  // TODO: clean implementation, separate into file/function
+
+  // Get user's config
+  const userConfig = await userConfigRef.doc(jid).get();
+  if (userConfig.exists) {
+    MESSAGE_QUEUE_DELAY = userConfig.data()?.responseTime ?? 10000;
+  }
+
+  if (msgContent.conversation === "CLEAR_HISTORY") {
     await clearChatHistory(jid);
     await sock.sendMessage(jid, { text: "✅ History cleared" });
     return;
   }
 
-  if (msg.message.conversation?.startsWith("SET_RESPONSE_TIME")) {
+  if (msgContent.conversation?.startsWith("SET_RESPONSE_TIME")) {
     // Validate command
-    const responseTime = parseInt(msg.message.conversation.split(" ")[1]);
+    const responseTime = parseInt(msgContent.conversation.split(" ")[1]);
     if (isNaN(responseTime)) {
       await sock.sendMessage(jid, { text: "❌ Invalid syntax" });
       return;
@@ -228,18 +243,12 @@ async function handleNewMessage(
     return;
   }
 
-  // get user config
-  const userConfig = await userConfigRef.doc(jid).get();
-  if (userConfig.exists) {
-    MESSAGE_QUEUE_DELAY = userConfig.data()?.responseTime ?? 10000;
-  }
-
   try {
     // Log basic message info but avoid full content for privacy
     logger.info(
       {
         jid,
-        messageId,
+        msgId,
         fromMe: msg.key.fromMe,
         pushName: msg.pushName,
         timestamp: msg.messageTimestamp,
@@ -248,40 +257,26 @@ async function handleNewMessage(
       "Processing message"
     );
 
-    const messageType = getContentType(msg.message);
-    const isMedia = [
-      "imageMessage",
-      "audioMessage",
-      "documentMessage",
-      "videoMessage",
-    ].includes(messageType ?? "");
+    // * process media
 
-    // Handle media processing if needed
-    let processResult = null;
-    let mimeType = null;
+    let processResult: string | null = null;
 
-    if (isMedia) {
-      logger.debug({ messageId, messageType }, "Processing media message");
-      const result = await processMediaMessage(
-        msg,
-        messageType,
-        messageId,
-        sock
-      );
-      processResult = result.processResult;
-      mimeType = result.mimeType;
+    const mediaContent = assertMediaContent(msgContent);
+
+    if (mediaContent) {
+      processResult = await processMediaMessage(msg, sock);
     }
 
     // Store message in Firestore
-    logger.debug({ messageId, messageType }, "Storing message in firestore");
+    logger.debug({ msgId, msgType }, "Storing message in firestore");
     const messageData = await storeMessage(msg, {
       jid,
-      messageId,
+      messageId: msgId,
       type,
       processResult,
-      isMedia,
-      messageType,
-      mimeType,
+      isMedia: mediaContent ? true : false,
+      messageType: msgType,
+      mimeType: mediaContent?.mimetype ?? null,
     });
 
     logger.debug({ messageData }, "Message data stored");
@@ -291,7 +286,7 @@ async function handleNewMessage(
 
     const duration = Date.now() - startTime;
     logger.debug(
-      { messageId, duration },
+      { msgId, duration },
       "Message processing completed. Sending to queue"
     );
 
@@ -305,198 +300,11 @@ async function handleNewMessage(
       {
         err: error,
         jid,
-        messageId,
+        msgId,
         duration,
       },
       "Error in message processing pipeline"
     );
-  }
-}
-
-/**
- * Processes media messages (images, audio, documents)
- */
-
-async function processMediaMessage(
-  msg: WAMessage,
-  messageType: MessageType | undefined,
-  messageId: string,
-  sock: ReturnType<typeof makeWASocket>
-): Promise<{ processResult: string | null; mimeType: string | null }> {
-  const startTime = Date.now();
-  let tempFilePath: string | null = null;
-
-  try {
-    // Download the media
-    logger.debug({ messageId, messageType }, "Downloading media");
-    const mediaBuffer = await downloadMediaMessage(
-      messageType === "documentWithCaptionMessage"
-        ? (msg.message?.documentWithCaptionMessage?.message as any)
-        : msg,
-      "buffer",
-      {},
-      {
-        reuploadRequest: sock.updateMediaMessage,
-        logger: logger as any,
-      }
-    );
-
-    const getMimeType = () => {
-      switch (messageType) {
-        case "imageMessage":
-          return msg.message?.imageMessage?.mimetype;
-        case "audioMessage":
-          return msg.message?.audioMessage?.mimetype;
-        case "documentMessage":
-          return msg.message?.documentMessage?.mimetype;
-        case "videoMessage":
-          return msg.message?.videoMessage?.mimetype;
-        case "documentWithCaptionMessage":
-          return msg.message?.documentWithCaptionMessage?.message
-            ?.documentMessage?.mimetype;
-        default:
-          return null;
-      }
-    };
-
-    // Determine mime type
-    const mimeType = getMimeType() ?? null;
-    const extension = mimeType
-      ? `.${mime.extension(mimeType) || "bin"}`
-      : ".bin";
-
-    // Upload to Firebase Storage
-    tempFilePath = path.join(
-      __dirname,
-      "..",
-      process.env.TEMP_DIR || ".temp",
-      `${messageId}${extension}`
-    );
-
-    // Ensure temp directory exists
-    try {
-      await mkdir(path.join(__dirname, "..", process.env.TEMP_DIR || ".temp"), {
-        recursive: true,
-      });
-    } catch (mkdirError) {
-      logger.error(
-        { err: mkdirError, dir: process.env.TEMP_DIR },
-        "Failed to create temp directory"
-      );
-    }
-
-    // Write media to temp file
-    await writeFile(
-      tempFilePath,
-      mediaBuffer,
-      messageType === "imageMessage" ? "base64" : undefined
-    );
-
-    logger.debug({ messageId, tempFilePath }, "Media saved to temp file");
-
-    // Upload to Firebase Storage
-    if (bucket !== undefined) {
-      try {
-        const bucketFilename = `${msg.key.remoteJid}/${messageId}${extension}`;
-
-        await bucket.upload(tempFilePath, {
-          destination: bucketFilename,
-          metadata: {
-            contentType: mimeType || "application/octet-stream",
-          },
-        });
-
-        logger.debug(
-          { messageId, bucketFilename },
-          "Media uploaded to storage"
-        );
-      } catch (uploadError) {
-        logger.error(
-          { err: uploadError, messageId },
-          "Failed to upload media to storage"
-        );
-      }
-    } else {
-      logger.warn(
-        { messageId },
-        "Storage bucket not available, skipping upload"
-      );
-    }
-
-    // Process based on media type
-    let processResult: string | null = null;
-
-    switch (messageType) {
-      case "imageMessage":
-        logger.debug({ messageId }, "Processing image with AI");
-        processResult = await processImage(tempFilePath);
-        break;
-      case "audioMessage":
-        logger.debug({ messageId }, "Processing audio with AI");
-        processResult = await processAudio(tempFilePath);
-        break;
-      case "videoMessage":
-        logger.debug({ messageId }, "Processing video with AI");
-        processResult = await processVideo(
-          tempFilePath,
-          mimeType ?? "video/mp4"
-        );
-        break;
-      case "documentMessage":
-      case "documentWithCaptionMessage":
-        logger.debug({ messageId }, "Processing document");
-        processResult = await processDocument(tempFilePath, mimeType);
-        break;
-
-      default:
-        // No processing for other types
-        break;
-    }
-
-    const duration = Date.now() - startTime;
-    logger.debug(
-      { messageId, messageType, duration },
-      "Media processing completed"
-    );
-
-    return { processResult, mimeType };
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error(
-      {
-        err: error,
-        messageId,
-        messageType,
-        duration,
-      },
-      "Media processing failed"
-    );
-
-    // Attempt to clean up temp file if it exists
-    if (tempFilePath) {
-      try {
-        await unlink(tempFilePath);
-      } catch (cleanupError) {
-        logger.warn(
-          { err: cleanupError, tempFilePath },
-          "Failed to clean up temp file"
-        );
-      }
-    }
-
-    return { processResult: null, mimeType: null };
-  }
-}
-
-async function processLinkMessage(
-  msg: WAMessage,
-  messageId: string,
-  sock: ReturnType<typeof makeWASocket>
-) {
-  const link = msg.message?.conversation;
-  if (!link) {
-    logger.debug({ messageId }, "Skipping message with no link");
-    return;
   }
 }
 
@@ -772,6 +580,174 @@ function generateLLMContext(
 }
 
 /**
+ * Process and store a message with media
+ *
+ * This function handles incoming messages, processes them based on type,
+ * stores them in Firestore, and queues them for further processing.
+ *
+ * @param msg - The WhatsApp message object
+ * @param type - Whether the message is being appended or is a notification
+ * @param sock - The WhatsApp socket connection
+ */
+
+const processMediaMessage = async (
+  msg: WAMessage,
+  sock: ReturnType<typeof makeWASocket>
+) => {
+  const msgContent = extractMessageContent(msg.message);
+
+  if (!msgContent) {
+    throw new Boom("No message present", { statusCode: 400, data: msg });
+  }
+
+  const mediaContent = assertMediaContent(msgContent);
+  if (!mediaContent) {
+    throw new Boom("No media content present", {
+      statusCode: 400,
+      data: msg,
+    });
+  }
+  const msgId = msg.key.id!;
+  const msgType = getContentType(msgContent);
+  const startTime = Date.now();
+
+  // Download media
+
+  const mediaBuffer = await downloadMediaMessage(
+    msg,
+    "buffer",
+    {},
+    {
+      reuploadRequest: sock.updateMediaMessage,
+      logger: logger as any,
+    }
+  );
+
+  const mimeType = mediaContent.mimetype ?? null;
+  const extension = extensionForMediaMessage(msgContent);
+
+  // * Store media to temp file
+  const tempDir = process.env.TEMP_DIR || ".temp";
+  const tempFilePath = path.join(
+    __dirname,
+    "..",
+    tempDir,
+    `${msgId}${extension}`
+  );
+
+  // Ensure temp directory exists
+  try {
+    await mkdir(path.join(__dirname, "..", tempDir), {
+      recursive: true,
+    });
+  } catch (mkdirError) {
+    logger.error(
+      { err: mkdirError, dir: process.env.TEMP_DIR },
+      "Failed to create temp directory"
+    );
+  }
+
+  // Write media to temp file
+  await writeFile(
+    tempFilePath,
+    mediaBuffer,
+    msgType === "imageMessage" ? "base64" : undefined // base64 for images - easier passing to llm
+  );
+
+  logger.debug({ msgId, tempFilePath }, "Media saved to temp file");
+
+  // * Upload to Firebase Storage
+  if (bucket) {
+    try {
+      const bucketFilename = `${msg.key.remoteJid}/${msgId}${extension}`;
+
+      await bucket.upload(tempFilePath, {
+        destination: bucketFilename,
+        metadata: {
+          contentType: mimeType || "application/octet-stream",
+        },
+      });
+
+      logger.debug({ msgId, bucketFilename }, "Media uploaded to storage");
+    } catch (uploadError) {
+      logger.error(
+        { err: uploadError, msgId },
+        "Failed to upload media to storage"
+      );
+    }
+  } else {
+    logger.warn({ msgId }, "Storage bucket not available, skipping upload");
+  }
+
+  let processResult: string | null = null;
+  // * Process media with AI
+  try {
+    // Process based on media type
+
+    switch (msgType) {
+      case "imageMessage":
+        logger.debug({ msgId }, "Processing image with AI");
+        processResult = await processImage(tempFilePath);
+        break;
+      case "audioMessage":
+        logger.debug({ msgId }, "Processing audio with AI");
+        processResult = await processAudio(tempFilePath);
+        break;
+      case "videoMessage":
+        logger.debug({ msgId }, "Processing video with AI");
+        processResult = await processVideo(
+          tempFilePath,
+          mimeType ?? "video/mp4"
+        );
+        break;
+      case "documentMessage":
+        logger.debug({ msgId }, "Processing document");
+        processResult = await processDocument(tempFilePath, mimeType);
+        break;
+      case "stickerMessage":
+        logger.debug({ msgId }, "Processing sticker");
+        processResult = await processImage(tempFilePath);
+        break;
+      default:
+        logger.debug(
+          { msgId },
+          "Generic media type - trying to process as document"
+        );
+        processResult = await processDocument(tempFilePath, mimeType);
+        break;
+    }
+
+    const duration = Date.now() - startTime;
+    logger.debug({ msgId, msgType, duration }, "Media processing completed");
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error(
+      {
+        err: error,
+        msgId,
+        msgType,
+        duration,
+      },
+      "Media processing failed"
+    );
+
+    // Attempt to clean up temp file if it exists
+    if (tempFilePath) {
+      try {
+        await unlink(tempFilePath);
+      } catch (cleanupError) {
+        logger.warn(
+          { err: cleanupError, tempFilePath },
+          "Failed to clean up temp file"
+        );
+      }
+    }
+  }
+
+  return processResult;
+};
+
+/**
  * Clears all messages for a given chat
  */
 async function clearChatHistory(chatId: string) {
@@ -780,6 +756,23 @@ async function clearChatHistory(chatId: string) {
   messages.docs.forEach((doc) => batch.delete(doc.ref));
   await batch.commit();
 }
+
+export const assertMediaContent = (
+  content: proto.IMessage | null | undefined
+) => {
+  content = extractMessageContent(content);
+  const mediaContent =
+    content?.documentMessage ||
+    content?.imageMessage ||
+    content?.videoMessage ||
+    content?.audioMessage ||
+    content?.stickerMessage;
+  if (!mediaContent) {
+    return null;
+  }
+
+  return mediaContent;
+};
 
 export default function makeMessageProcessor() {
   return {
