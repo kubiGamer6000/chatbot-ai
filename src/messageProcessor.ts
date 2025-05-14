@@ -291,32 +291,32 @@ async function handleNewMessage(
       "Message processing completed. Sending to queue"
     );
 
-    // Queue message for further processing
-    if (!msg.key.fromMe) {
-      // check if the chat alreadt has a thread in firestore
+    // // Queue message for further processing
+    // if (!msg.key.fromMe) {
+    //   // check if the chat alreadt has a thread in firestore
 
-      const threadRef = threadsRef.doc(jid);
-      const threadDoc = await threadRef.get();
-      if (!threadDoc.exists) {
-        // create a new thread with user's jid as the
-        const { agent, thread } = await createThread();
-        await threadRef.set({
-          assistantId: agent.assistant_id,
-          threadId: thread.thread_id,
-        });
-      }
+    //   const threadRef = threadsRef.doc(jid);
+    //   const threadDoc = await threadRef.get();
+    //   if (!threadDoc.exists) {
+    //     // create a new thread with user's jid as the
+    //     const { agent, thread } = await createThread();
+    //     await threadRef.set({
+    //       assistantId: agent.assistant_id,
+    //       threadId: thread.thread_id,
+    //     });
+    //   }
 
-      sock.sendPresenceUpdate("composing", jid);
-      const response = await runAgentThread(
-        threadDoc.data()?.threadId,
-        threadDoc.data()?.assistantId,
-        messageData as FirestoreMessage
-      );
+    //   sock.sendPresenceUpdate("composing", jid);
+    //   const response = await runAgentThread(
+    //     threadDoc.data()?.threadId,
+    //     threadDoc.data()?.assistantId,
+    //     messageData as FirestoreMessage
+    //   );
 
-      console.log(JSON.stringify(response, null, 2));
+    //   console.log(JSON.stringify(response, null, 2));
 
-      // await runMessageQueue(msg, sock);
-    }
+    //   // await runMessageQueue(msg, sock);
+    // }
   } catch (error) {
     const duration = Date.now() - startTime;
     logger.error(
