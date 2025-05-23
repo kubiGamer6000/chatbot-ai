@@ -36,18 +36,28 @@ export const sendToAgent = async (
   // });
   const threadRef = threadsRef.doc(jid);
   const threadDoc = await threadRef.get();
+
+  let assistantId, threadId;
+
   if (!threadDoc.exists) {
-    // create a new thread with user's jid as the
+    // create a new thread with user's jid as the ID
     const { agent, thread } = await createThread();
+    assistantId = agent.assistant_id;
+    threadId = thread.thread_id;
+
     await threadRef.set({
-      assistantId: agent.assistant_id,
-      threadId: thread.thread_id,
+      assistantId,
+      threadId,
     });
+  } else {
+    // Use existing thread data
+    assistantId = threadDoc.data()?.assistantId;
+    threadId = threadDoc.data()?.threadId;
   }
 
   const response = await runAgentThread(
-    threadDoc.data()?.threadId,
-    threadDoc.data()?.assistantId,
+    threadId,
+    assistantId,
     messageData as FirestoreMessage
   );
 
