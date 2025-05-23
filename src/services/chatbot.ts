@@ -98,20 +98,27 @@ export const runAgentThread = async (
   assistantId: string,
   message: FirestoreMessage
 ) => {
-  // Start a streaming run
-  const { contextMessages } = generateLLMContext(
-    [message],
-    threadId,
-    Date.now()
+  // get previous 50 messages from firestore
+  const messages = await db
+    .collection(process.env.FIRESTORE_MESSAGE_COLLECTION)
+    .where("jid", "==", message.key.remoteJid)
+    .orderBy("timestamp", "desc")
+    .limit(35)
+    .get();
+
+  const messagesData = messages.docs.map(
+    (doc) => doc.data() as FirestoreMessage
   );
+
+  // Start a streaming run
+  const { context } = generateLLMContext(messagesData, threadId, Date.now());
 
   // contextMessages { key}
 
-  const response = await client.runs.wait(threadId, assistantId, {
+  const response = await client.runs.wait(null, assistantId, {
     input: {
-      messages: [{ role: "human", content: contextMessages[0].message }],
+      messages: [{ role: "human", content: context }],
     },
-    multitaskStrategy: "interrupt",
   });
 
   return (response as any).messages[(response as any).messages.length - 1]
