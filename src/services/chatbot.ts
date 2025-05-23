@@ -141,7 +141,7 @@ export function generateLLMContext(
     const timeSince =
       currentTime - toNumber(lastMessageFromMe.messageTimestamp) * 1000;
     const minutes = Math.floor(timeSince / (1000 * 60));
-    context += `- Time since last message from me: ${minutes} minutes\n\n`;
+    context += `- Time since last message from this chat: ${minutes} minutes\n\n`;
   }
 
   // Process messages
@@ -230,7 +230,7 @@ export function generateLLMContext(
     // add jid and message id to the message content (in beginning, in  [ )
     const messageKeyData = `remoteJid: ${msg.key.remoteJid}, msgId: ${msg.key.id}, fromMe: ${msg.key.fromMe}`;
 
-    // context += `[MSG ID: ${msg.key.id}] [${timestamp}] ${sender}: ${messageContent}\n`;
+    context += `[DATA: ${messageKeyData}] [${timestamp}] ${sender}: ${messageContent}\n`;
     contextMessages.push({
       key: msg.key ?? { id: "unknown", remoteJid: "unknown", fromMe: false },
       message: `// ${messageKeyData} // [${timestamp}] ${sender}: ${messageContent}\n`,
