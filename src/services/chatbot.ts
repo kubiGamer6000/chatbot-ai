@@ -6,57 +6,52 @@ import {
 } from "@whiskeysockets/baileys";
 import logger from "../utils/logger";
 import { loadMessages } from "../messageProcessor";
-import { FirestoreMessage } from "../types";
 import { sendWebhook } from "./webhook";
+import { Client, ThreadState } from "@langchain/langgraph-sdk";
+import { FirestoreMessage } from "../types";
+import { db } from "./firebase-admin.js";
+const threadsRef = db.collection("threads");
 
-export const processMessages = async (messages: WAMessage[], jid: string) => {
-  if (isJidGroup(jid)) {
-    let shouldProcess = false;
-    for (const message of messages) {
-      if (
-        message.message?.conversation?.startsWith("heyai") ||
-        message.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(
-          process.env.WHATSAPP_PHONE_NUMBER + "@s.whatsapp.net"
-        ) ||
-        message.message?.imageMessage?.caption?.includes("heyai") ||
-        message.message?.imageMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.documentMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.extendedTextMessage?.text?.includes("heyai") ||
-        message.message?.extendedTextMessage?.text?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.videoMessage?.caption?.includes(
-          "@" + process.env.WHATSAPP_PHONE_NUMBER
-        ) ||
-        message.message?.videoMessage?.caption?.includes("heyai")
-      ) {
-        shouldProcess = true;
-        break;
-      }
-    }
-    if (!shouldProcess) return;
+export const sendToAgent = async (
+  message: WAMessage,
+  messageData: FirestoreMessage,
+  jid: string
+) => {
+  // logger.info(`Processing ${messages.length} messages for ${jid}`);
+  // const messageHistory = await loadMessages(jid, 25);
+
+  // console.log(messageHistory);
+  // const { context, contextMessages } = generateLLMContext(
+  //   messageHistory,
+  //   jid,
+  //   Date.now()
+  // );
+
+  // logger.info("sending webhook");
+  // await sendWebhook({
+  //   conversationContext: context,
+  //   contextMessages,
+  //   rawData: messageHistory,
+  //   jid,
+  // });
+  const threadRef = threadsRef.doc(jid);
+  const threadDoc = await threadRef.get();
+  if (!threadDoc.exists) {
+    // create a new thread with user's jid as the
+    const { agent, thread } = await createThread();
+    await threadRef.set({
+      assistantId: agent.assistant_id,
+      threadId: thread.thread_id,
+    });
   }
-  logger.info(`Processing ${messages.length} messages for ${jid}`);
-  const messageHistory = await loadMessages(jid, 25);
 
-  console.log(messageHistory);
-  const { context, contextMessages } = generateLLMContext(
-    messageHistory,
-    jid,
-    Date.now()
+  const response = await runAgentThread(
+    threadDoc.data()?.threadId,
+    threadDoc.data()?.assistantId,
+    messageData as FirestoreMessage
   );
 
-  logger.info("sending webhook");
-  await sendWebhook({
-    conversationContext: context,
-    contextMessages,
-    rawData: messageHistory,
-    jid,
-  });
+  return response;
 
   // TODO: Queue to resend if webhook fails
 };
@@ -64,6 +59,53 @@ export const processMessages = async (messages: WAMessage[], jid: string) => {
 type ContextMessage = {
   key: WAMessageKey;
   message: string;
+};
+
+const client = new Client({
+  apiUrl: "https://scandiai-16a992c23975590085c548e27f64788d.us.langgraph.app",
+  apiKey: process.env.LANGSMITH_API_KEY,
+});
+
+export const createThread = async (threadId?: string) => {
+  // Start a new thread
+  const assistants = await client.assistants.search({
+    metadata: null,
+    graphId: "agent",
+    offset: 0,
+    limit: 10,
+  });
+
+  // We auto-create an assistant for each graph you register in config.
+  const agent = assistants[0];
+
+  const thread = await client.threads.create();
+
+  return { agent, thread };
+};
+
+export const runAgentThread = async (
+  threadId: string,
+  assistantId: string,
+  message: FirestoreMessage
+) => {
+  // Start a streaming run
+  const { contextMessages } = generateLLMContext(
+    [message],
+    threadId,
+    Date.now()
+  );
+
+  // contextMessages { key}
+
+  const response = await client.runs.wait(threadId, assistantId, {
+    input: {
+      messages: [{ role: "human", content: contextMessages[0].message }],
+    },
+    multitaskStrategy: "interrupt",
+  });
+
+  return (response as any).messages[(response as any).messages.length - 1]
+    .content[0].text;
 };
 
 export function generateLLMContext(
@@ -144,6 +186,16 @@ export function generateLLMContext(
               ? `Sticker description: "${msg.processResult}"`
               : ""
           }`;
+        case "pollCreationMessageV3":
+          messageContent = `[POLL CREATED]\nName: ${
+            msg.message?.pollCreationMessageV3?.name
+          }\nOptions: ${JSON.stringify(
+            msg.message?.pollCreationMessageV3?.options
+          )}`;
+          break;
+        case "pollUpdateMessage":
+          messageContent = `[VOTE UPDATED]`;
+          // TODO: Add better poll tracking
           break;
         default:
           messageContent = `Uncommon message type [${
@@ -158,11 +210,13 @@ export function generateLLMContext(
         JSON.stringify(msg.message) ||
         "";
     }
+    // add jid and message id to the message content (in beginning, in  [ )
+    const messageKeyData = `remoteJid: ${msg.key.remoteJid}, msgId: ${msg.key.id}, fromMe: ${msg.key.fromMe}`;
 
     // context += `[MSG ID: ${msg.key.id}] [${timestamp}] ${sender}: ${messageContent}\n`;
     contextMessages.push({
-      key: msg.key ?? "1",
-      message: `[${timestamp}] ${sender}: ${messageContent}\n`,
+      key: msg.key ?? { id: "unknown", remoteJid: "unknown", fromMe: false },
+      message: `// ${messageKeyData} // [${timestamp}] ${sender}: ${messageContent}\n`,
     });
   });
 

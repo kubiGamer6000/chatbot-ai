@@ -21,7 +21,7 @@ import path from "path";
 import { processImage } from "./services/media/image.js";
 import { processAudio } from "./services/media/audio.js";
 
-import { processMessages } from "./services/chatbot.js";
+import { sendToAgent } from "./services/chatbot.js";
 
 import logger from "./utils/logger.js";
 import { processDocument } from "./services/media/document.js";
@@ -31,7 +31,6 @@ import type { FirestoreMessage } from "./types.js";
 import { processVideo } from "./services/media/video.js";
 import { sendWebhook } from "./services/webhook.js";
 import { Boom } from "@hapi/boom";
-import { createThread, runAgentThread } from "./services/langgraph.js";
 
 const serializeToPlainObject = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
@@ -45,7 +44,7 @@ const convertToFirestoreTimestamp = (unixTimestamp: number) => {
 // Collection references
 const chatsRef = db.collection(process.env.FIRESTORE_CHAT_COLLECTION!);
 const messagesRef = db.collection(process.env.FIRESTORE_MESSAGE_COLLECTION!);
-const threadsRef = db.collection("threads");
+
 const userConfigRef = db.collection("userConfig");
 
 export const loadMessages = async (jid: string, limit: number = 50) => {
@@ -147,41 +146,41 @@ export const bind = (sock: ReturnType<typeof makeWASocket>) => {
 };
 
 //* MESAGE QUEUE - simple fix for double-texting//
-const messageQueues = new Map<
-  string,
-  {
-    messages: WAMessage[];
-    timeout: NodeJS.Timeout;
-  }
->();
-let MESSAGE_QUEUE_DELAY = 10000; // 10 seconds in milliseconds
-let CONTEXT_LENGTH = 25;
+// const messageQueues = new Map<
+//   string,
+//   {
+//     messages: WAMessage[];
+//     timeout: NodeJS.Timeout;
+//   }
+// >();
+// let MESSAGE_QUEUE_DELAY = 10000; // 10 seconds in milliseconds
+// let CONTEXT_LENGTH = 25;
 
-const runMessageQueue = async (
-  msg: WAMessage,
-  sock: ReturnType<typeof makeWASocket>
-) => {
-  if (msg.key.fromMe) return;
+// const runMessageQueue = async (
+//   msg: WAMessage,
+//   sock: ReturnType<typeof makeWASocket>
+// ) => {
+//   if (msg.key.fromMe) return;
 
-  const chatId = msg.key.remoteJid!;
-  const queue = messageQueues.get(chatId);
-  if (queue) {
-    clearTimeout(queue.timeout);
-    queue.messages.push(msg);
-  } else {
-    messageQueues.set(chatId, {
-      messages: [msg],
-      timeout: null!,
-    });
-  }
-  const timeout = setTimeout(async () => {
-    const { messages } = messageQueues.get(chatId)!;
-    // await sock.sendPresenceUpdate("composing", chatId);
-    processMessages(messages, chatId);
-    messageQueues.delete(chatId);
-  }, MESSAGE_QUEUE_DELAY);
-  messageQueues.get(chatId)!.timeout = timeout;
-};
+//   const chatId = msg.key.remoteJid!;
+//   const queue = messageQueues.get(chatId);
+//   if (queue) {
+//     clearTimeout(queue.timeout);
+//     queue.messages.push(msg);
+//   } else {
+//     messageQueues.set(chatId, {
+//       messages: [msg],
+//       timeout: null!,
+//     });
+//   }
+//   const timeout = setTimeout(async () => {
+//     const { messages } = messageQueues.get(chatId)!;
+//     // await sock.sendPresenceUpdate("composing", chatId);
+//     processMessages(messages, chatId);
+//     messageQueues.delete(chatId);
+//   }, MESSAGE_QUEUE_DELAY);
+//   messageQueues.get(chatId)!.timeout = timeout;
+// };
 
 // * MESSAGE PROCESSOR - Processes a single new message, handling commands, media, and storage
 
@@ -217,11 +216,11 @@ async function handleNewMessage(
   // * QUEUE COMMAND HANDLER - simple commands for managing history and response time
   // TODO: clean implementation, separate into file/function
 
-  // Get user's config
-  const userConfig = await userConfigRef.doc(jid).get();
-  if (userConfig.exists) {
-    MESSAGE_QUEUE_DELAY = userConfig.data()?.responseTime ?? 10000;
-  }
+  // // Get user's config
+  // const userConfig = await userConfigRef.doc(jid).get();
+  // if (userConfig.exists) {
+  //   MESSAGE_QUEUE_DELAY = userConfig.data()?.responseTime ?? 10000;
+  // }
 
   if (msgContent.conversation === "CLEAR_HISTORY") {
     await clearChatHistory(jid);
@@ -291,32 +290,22 @@ async function handleNewMessage(
       "Message processing completed. Sending to queue"
     );
 
-    // // Queue message for further processing
-    // if (!msg.key.fromMe) {
-    //   // check if the chat alreadt has a thread in firestore
-
-    //   const threadRef = threadsRef.doc(jid);
-    //   const threadDoc = await threadRef.get();
-    //   if (!threadDoc.exists) {
-    //     // create a new thread with user's jid as the
-    //     const { agent, thread } = await createThread();
-    //     await threadRef.set({
-    //       assistantId: agent.assistant_id,
-    //       threadId: thread.thread_id,
-    //     });
-    //   }
-
-    //   sock.sendPresenceUpdate("composing", jid);
-    //   const response = await runAgentThread(
-    //     threadDoc.data()?.threadId,
-    //     threadDoc.data()?.assistantId,
-    //     messageData as FirestoreMessage
-    //   );
-
-    //   console.log(JSON.stringify(response, null, 2));
-
-    //   // await runMessageQueue(msg, sock);
-    // }
+    // Queue message for further processing
+    if (!msg.key.fromMe) {
+      // check if the chat alreadt has a thread in firestore
+      // await runMessageQueue(msg, sock);
+      if (shouldProcessMessage(msg, jid)) {
+        sock.sendPresenceUpdate("composing", jid);
+        const response = await sendToAgent(
+          msg,
+          messageData as FirestoreMessage,
+          jid
+        );
+        if (response) {
+          await sock.sendMessage(jid, { text: response });
+        }
+      }
+    }
   } catch (error) {
     const duration = Date.now() - startTime;
     logger.error(
@@ -637,6 +626,40 @@ export const assertMediaContent = (
 
   return mediaContent;
 };
+
+function shouldProcessMessage(msg: WAMessage, jid: string) {
+  if (isJidGroup(jid)) {
+    let shouldProcess = false;
+
+    if (
+      msg.message?.conversation?.startsWith("heyai") ||
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(
+        process.env.WHATSAPP_PHONE_NUMBER + "@s.whatsapp.net"
+      ) ||
+      msg.message?.imageMessage?.caption?.includes("heyai") ||
+      msg.message?.imageMessage?.caption?.includes(
+        "@" + process.env.WHATSAPP_PHONE_NUMBER
+      ) ||
+      msg.message?.documentMessage?.caption?.includes(
+        "@" + process.env.WHATSAPP_PHONE_NUMBER
+      ) ||
+      msg.message?.extendedTextMessage?.text?.includes("heyai") ||
+      msg.message?.extendedTextMessage?.text?.includes(
+        "@" + process.env.WHATSAPP_PHONE_NUMBER
+      ) ||
+      msg.message?.videoMessage?.caption?.includes(
+        "@" + process.env.WHATSAPP_PHONE_NUMBER
+      ) ||
+      msg.message?.videoMessage?.caption?.includes("heyai")
+    ) {
+      shouldProcess = true;
+    }
+
+    return shouldProcess;
+  } else {
+    return true;
+  }
+}
 
 export default function makeMessageProcessor() {
   return {

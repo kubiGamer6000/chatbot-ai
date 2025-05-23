@@ -2,15 +2,22 @@ import { ElevenLabsClient } from "elevenlabs";
 // const ffmpeg = require("fluent-ffmpeg");
 // import ffmpegPath from "ffmpeg-static";
 import fs from "fs";
-import { sendTelegramError } from "../telegram.js";
-import logger from "../../utils/logger.js";
+import { sendTelegramError } from "../telegram";
+import logger from "../../utils/logger";
+import { OpenAI } from "openai";
 
-// // Set ffmpeg path
+// Set ffmpeg path
 // if (ffmpegPath) {
 //   ffmpeg.setFfmpegPath(ffmpegPath);
 // } else {
 //   logger.warn("ffmpeg-static path not found, using system ffmpeg if available");
 // }
+
+const elevenLabsClient = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY,
+});
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Convert audio file to MP3 format
@@ -43,10 +50,7 @@ import logger from "../../utils/logger.js";
  * @param elevenLabsClient ElevenLabs instance
  * @returns Promise<string> Transcribed text
  */
-async function transcribe(
-  audioPath: string,
-  elevenLabsClient: ElevenLabsClient
-): Promise<string> {
+async function transcribeWithElevenLabs(audioPath: string): Promise<string> {
   if (!fs.existsSync(audioPath)) {
     throw new Error(`Audio file not found: ${audioPath}`);
   }
@@ -58,6 +62,15 @@ async function transcribe(
   });
 
   return transcription.text;
+}
+
+async function transcribeWithOpenAI(audioPath: string): Promise<string> {
+  const transcript = await openai.audio.transcriptions.create({
+    file: fs.createReadStream(audioPath),
+    model: "gpt-4o-transcribe",
+  });
+
+  return transcript.text;
 }
 
 /**
@@ -79,19 +92,18 @@ export async function processAudio(filePath: string): Promise<string | null> {
       return null;
     }
 
-    const elevenLabsClient = new ElevenLabsClient({
-      apiKey: process.env.ELEVENLABS_API_KEY,
-    });
+    logger.debug({ filePath }, "Transcribing audio with ElevenLabs");
+    let transcript: string;
 
-    // Uncomment and use if MP3 conversion is needed
-    // logger.debug({ filePath }, "Converting audio to MP3 format");
-    // const mp3Path = `${filePath}.mp3`;
-    // await convertToMp3(filePath, mp3Path);
-    // logger.debug({ filePath: mp3Path }, "Transcribing MP3 audio");
-    // const transcript = await transcribe(mp3Path, openai);
-
-    logger.debug({ filePath }, "Transcribing audio");
-    const transcript = await transcribe(filePath, elevenLabsClient);
+    try {
+      transcript = await transcribeWithElevenLabs(filePath);
+    } catch (elevenLabsError) {
+      logger.warn(
+        { err: elevenLabsError, filePath },
+        "ElevenLabs transcription failed, falling back to OpenAI"
+      );
+      transcript = await transcribeWithOpenAI(filePath);
+    }
 
     // Clean up the file
     try {
@@ -112,6 +124,7 @@ export async function processAudio(filePath: string): Promise<string | null> {
 
     return transcript;
   } catch (error) {
+    // This catches any errors not handled in the inner try/catch
     const errorObj =
       error instanceof Error
         ? { message: error.message, name: error.name, stack: error.stack }
