@@ -101,7 +101,7 @@ export const runAgentThread = async (
   // get previous 50 messages from firestore
   const messages = await db
     .collection(process.env.FIRESTORE_MESSAGE_COLLECTION)
-    .where("jid", "==", message.key.remoteJid)
+    .where("chatId", "==", message.chatId)
     .orderBy("timestamp", "desc")
     .limit(35)
     .get();
