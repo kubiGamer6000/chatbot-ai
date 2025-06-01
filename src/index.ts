@@ -8,6 +8,8 @@ import { sendTelegramMessage, sendTelegramPhoto } from "./services/telegram.js";
 
 import { generateQRImage } from "./utils/generateQrImage.js";
 
+import { processVideo } from "./services/media/video.js";
+
 import * as fs from "fs";
 import { Boom } from "@hapi/boom";
 
@@ -22,9 +24,16 @@ import NodeCache from "node-cache";
 import logger from "./utils/logger.js";
 import path from "path";
 import express, { Request, Response, NextFunction } from "express";
+
+import crypto from "crypto";
 import helmet from "helmet";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream";
+import { promisify } from "util";
+
+const streamPipeline = promisify(pipeline);
 
 const processor = makeMessageProcessor();
 
@@ -169,6 +178,97 @@ app.use(
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
+app.use(express.json({ limit: "1mb" })); // parse JSON body
+
+// Put the base‑64 secret from your dashboard here
+
+/* ---- helpers ----------------------------------------------------------- */
+
+function sortKeys(value: any): any {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, k) => ({ ...acc, [k]: sortKeys(value[k]) }), {});
+  }
+  return value;
+}
+
+/** Sign a payload and return a base‑64 HMAC‑SHA256 digest */
+function signPayload(payload: any, secretB64: string) {
+  const canonical = JSON.stringify(sortKeys(payload));
+  const secretBuf = Buffer.from(secretB64, "base64");
+  return crypto
+    .createHmac("sha256", secretBuf)
+    .update(canonical, "utf8")
+    .digest("base64");
+}
+
+/* ---- middleware & route ----------------------------------------------- */
+
+app.post("/sendMeetingUpdate", async (req: any, res: any) => {
+  const payload = req.body;
+  const signatureFromHeader = req.header("X-Webhook-Signature") || "";
+  const signatureCalculated = signPayload(
+    payload,
+    process.env.ATTENDEE_WEBHOOK_SECRET!
+  );
+
+  console.log("Received payload =", payload);
+  console.log("signature_from_header =", signatureFromHeader);
+  console.log("signature_from_payload =", signatureCalculated);
+
+  if (signatureCalculated !== signatureFromHeader) {
+    console.log("Signature is invalid");
+    return res.status(400).send("Invalid signature");
+  }
+
+  console.log("Signature is valid");
+
+  res.send("Webhook received successfully");
+
+  // check if event_type is "meeting_update"
+  if (payload.data.event_type !== "post_processing_completed") {
+    const response = await fetch(
+      `https://app.attendee.dev/api/v1/bots/${payload.bot_id}/recording`,
+      {
+        headers: {
+          Authorization: `Token ${process.env.ATTENDEE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    const meetingDataResponse: any = await fetch(
+      `https://app.attendee.dev/api/v1/bots/${payload.bot_id}`,
+      {
+        headers: {
+          Authorization: `Token ${process.env.ATTENDEE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    if (response.url) {
+      const filePath = path.join(__dirname, "tmp", payload.bot_id + ".mp4");
+      await downloadMP4(response.url, filePath);
+
+      const prompt = `This is a video meeting. You need to summarize this meeting in detail, outlining the main points, takeaways, action steps, and any key info and reminders. Be detailed.`;
+      const summary = await processVideo(filePath, "video/mp4", prompt);
+
+      if (summary) {
+        await sock.sendMessage(meetingDataResponse.metadata.jid, {
+          text: summary,
+        });
+      }
+    }
+  }
+
+  // check if meeting_id is in the payload
+});
+
 //listen for post requests
 app.post("/sendMessage", apiKeyAuth, async (req: any, res: any) => {
   logger.info(`Received request to send messages to ${req.body.jid}`);
@@ -206,3 +306,15 @@ app.listen(PORT, () => {
 
   connectToWhatsApp();
 });
+
+async function downloadMP4(url: string, filePath: string): Promise<void> {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Unexpected response ${response.statusText}`);
+  }
+
+  await streamPipeline(response.body!, createWriteStream(filePath));
+
+  logger.info(`Downloaded file to ${filePath}`);
+}
